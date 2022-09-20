@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "fireorm": "^0.23.3",
+    "reflect-metadata": "^0.1.13"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "projects": {
+    "dev": "flutter-intern-wo",
+    "prod": "flutter-intern-wo"
+  }
+}
