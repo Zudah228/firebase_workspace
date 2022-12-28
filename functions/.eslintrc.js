@@ -33,7 +33,7 @@ module.exports = {
     "no-var": "error",
     "prefer-const": "warn",
     indent: ["warn", 2],
-    semi: ["error", "always"],
+    semi: ["warn", "always"],
     "max-len": [
       "warn",
       {

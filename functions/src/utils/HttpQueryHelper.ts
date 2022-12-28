@@ -1,4 +1,4 @@
-type QueryParam = string | qs.ParsedQs | string[] | qs.ParsedQs[] | undefined;
+export type QueryParam = string | qs.ParsedQs | string[] | qs.ParsedQs[] | undefined;
 
 /**
  * Http のクエリを、JavaScript のプリミティブに変換する Helper クラス
@@ -6,6 +6,7 @@ type QueryParam = string | qs.ParsedQs | string[] | qs.ParsedQs[] | undefined;
 export class HttpQueryHelper {
   /**
    * クエリを string に変換
+   *
    * @param {QueryParam}  queryParam - クエリ
    * @return {string | undefined} - string 以外を undefined で返す
    */
@@ -24,6 +25,7 @@ export class HttpQueryHelper {
 
   /**
    * クエリを number に変換
+   *
    * @param {QueryParam}  queryParam - クエリ
    * @return {number | undefined} - number 以外を undefined で返す
    */
@@ -38,6 +40,7 @@ export class HttpQueryHelper {
 
   /**
    * クエリを boolean に変換。boolean ではない場合は、強制的に false にする。
+   *
    * @param {QueryParam}  queryParam - クエリ
    * @return {boolean} - boolean 以外は false
    */

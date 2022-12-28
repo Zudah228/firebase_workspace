@@ -1,32 +1,38 @@
-import * as admin from "firebase-admin";
-
+import { SetOptions } from "@google-cloud/firestore";
 import { ClassConstructor } from "class-transformer";
 import { firestore } from "firebase-admin";
-import { AdminFirestoreRepositoryJsonConverter } from "./utils/AdminFirestoreRepositoryJsonConverter";
-import { FirestoreDocument, FirestoreUpdateType, FirestoreWriteType } from "./types";
-import { SetOptions } from "@google-cloud/firestore";
+import { Firestore } from "firebase-admin/firestore";
 
-export const adminDb = admin.firestore();
+import { FirestoreDocument, FirestoreDocumentReference, FirestoreWriteType, QueryBuilder } from "./types";
+import { AdminFirestoreRepositoryJsonConverter } from "./utils/AdminFirestoreRepositoryJsonConverter";
+
 /**
  * JavaScript の class と Firestore のデータをやり取りさせるためのクラス。
- *
  * Timestamp を Date に加工したりする。
  *
  * インスタンスを無駄に生成しないように、関数呼び出しの度に path を設定するようにしている。
  * path を class の static に設定するなど、path の変更容易性を担保すること。
  */
-export class AdminFirestoreRepository<T> extends AdminFirestoreRepositoryJsonConverter<T> {
-  constructor(entityConstructor: ClassConstructor<T>) {
+export class AdminFirestoreRepository<
+  T,
+  WriteType extends firestore.DocumentData = FirestoreWriteType<T>
+> extends AdminFirestoreRepositoryJsonConverter<T> {
+  constructor(entityConstructor: ClassConstructor<T>, firestore: Firestore) {
     super(entityConstructor);
+    this.firestore = firestore;
   }
+
+  private firestore: Firestore;
+
+  // reference
 
   /**
    * transaction などで使用するために public に設定している。
    * @param documentPath
    * @returns
    */
-  public getDocumentRef(documentPath: string): firestore.DocumentReference {
-    return adminDb.doc(documentPath);
+  public getDocumentReference(documentPath: string): firestore.DocumentReference {
+    return this.firestore.doc(documentPath);
   }
 
   /**
@@ -34,9 +40,11 @@ export class AdminFirestoreRepository<T> extends AdminFirestoreRepositoryJsonCon
    * @param collectionPath
    * @returns
    */
-  public getCollectionRef(collectionPath: string) {
-    return adminDb.collection(collectionPath);
+  public getCollectionReference(collectionPath: string) {
+    return this.firestore.collection(collectionPath);
   }
+
+  // write
 
   /**
    * set でドキュメントを指定して保存。
@@ -49,14 +57,12 @@ export class AdminFirestoreRepository<T> extends AdminFirestoreRepositoryJsonCon
    * @param item
    * @param options
    */
-  public async set(documentPath: string, item: FirestoreWriteType<T>, options?: SetOptions): Promise<void> {
-    await this.getDocumentRef(documentPath).set(this.toJson(item), options ?? { merge: true });
+  public async set(documentPath: string, item: WriteType, options?: SetOptions): Promise<void> {
+    await this.getDocumentReference(documentPath).set(this.toJson(item), options ?? { merge: true });
   }
 
   /**
    * add で自動生成のドキュメントを作成。
-   *
-   * 返り値は生成した id
    *
    * バックグラウンド関数では、冪等性が担保されないため、あまり推奨しない。
    *
@@ -64,11 +70,11 @@ export class AdminFirestoreRepository<T> extends AdminFirestoreRepositoryJsonCon
    * getter やその他関数は除外される。FieldValue の使用が可能。
    * @param collectionPath
    * @param item
-   * @returns {string} - 自動生成した id
+   * @returns {string} - 自動生成した id を含んだ DocumentReference
    */
-  public async saveWithAutoDocumentId(collectionPath: string, item: FirestoreWriteType<T>): Promise<string> {
-    const ref = await adminDb.collection(collectionPath).add(this.toJson(item));
-    return ref.id;
+  public async add(collectionPath: string, item: WriteType): Promise<FirestoreDocumentReference> {
+    const ref = await this.firestore.collection(collectionPath).add(this.toJson(item));
+    return ref;
   }
 
   /**
@@ -79,8 +85,8 @@ export class AdminFirestoreRepository<T> extends AdminFirestoreRepositoryJsonCon
    * @param documentPath
    * @param item
    */
-  public async updateSomeField(documentPath: string, item: FirestoreUpdateType<T>): Promise<void> {
-    await this.getDocumentRef(documentPath).update(this.toJson(item));
+  public async updateSomeField(documentPath: string, item: Partial<WriteType>): Promise<void> {
+    await this.getDocumentReference(documentPath).update(this.toJson(item));
   }
 
   /**
@@ -88,8 +94,10 @@ export class AdminFirestoreRepository<T> extends AdminFirestoreRepositoryJsonCon
    * @param documentPath
    */
   public async delete(documentPath: string): Promise<void> {
-    await this.getDocumentRef(documentPath).delete();
+    await this.getDocumentReference(documentPath).delete();
   }
+
+  // read
 
   /**
    * Timestamp は Date に変換される。
@@ -97,15 +105,8 @@ export class AdminFirestoreRepository<T> extends AdminFirestoreRepositoryJsonCon
    * @returns
    */
   public async fetchDocument(documentPath: string): Promise<FirestoreDocument<T> | undefined> {
-    const snapshot = await this.getDocumentRef(documentPath).get();
-    if (!snapshot.exists) {
-      return undefined;
-    }
-    return {
-      ref: snapshot.ref,
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-      entity: this.fromJson(snapshot.data()!),
-    };
+    const snapshot = await this.getDocumentReference(documentPath).get();
+    return this.fromSnapshot(snapshot);
   }
 
   /**
@@ -116,7 +117,7 @@ export class AdminFirestoreRepository<T> extends AdminFirestoreRepositoryJsonCon
    * @returns
    */
   public async exists(documentPath: string): Promise<boolean> {
-    const snapshot = await this.getDocumentRef(documentPath).get();
+    const snapshot = await this.getDocumentReference(documentPath).get();
     return snapshot.exists;
   }
 
@@ -127,25 +128,33 @@ export class AdminFirestoreRepository<T> extends AdminFirestoreRepositoryJsonCon
    * @param query
    * @returns
    */
-  public async fetchCollection(query: firestore.Query): Promise<FirestoreDocument<T>[]> {
-    const snapshot = await query.get();
+  public async fetchCollection(queryBuilder: QueryBuilder): Promise<FirestoreDocument<T>[]> {
+    const snapshot = await queryBuilder(this.getCollectionReference).get();
 
     if (snapshot.docs.length === 0) {
       return [];
     }
     return snapshot.docs.map((snapshot) => {
-      return {
-        ref: snapshot.ref,
-        entity: this.fromJson(snapshot.data()),
-      };
+      return this.fromSnapshot(snapshot);
     });
   }
 }
 /**
  * クラスごとの AdminFirestoreRepository のインスタンス生成
+ *
+ * ### Type Param
+ * * T - やりとりする class 。
+ * * WriteType - デフォルトは FirestoreWriteType<T>。map を含むフィールドの場合、渡す必要がある。
+ *    * ex.)
+ *    *     type EntityWriteType = FirestoreWriteType<Omit<Entity, "mapField">> &
+ *    *       { mapField?: FirestoreWriteType<MapField> };
+ *
  * @param entityConstructor
  * @returns
  */
-export function getFirestoreDocumentRepository<T>(entityConstructor: ClassConstructor<T>): AdminFirestoreRepository<T> {
-  return new AdminFirestoreRepository<T>(entityConstructor);
+export function getAdminFirestoreRepository<T, WriteType extends firestore.DocumentData = FirestoreWriteType<T>>(
+  entityConstructor: ClassConstructor<T>,
+  firestore: Firestore
+): AdminFirestoreRepository<T, WriteType> {
+  return new AdminFirestoreRepository<T, WriteType>(entityConstructor, firestore);
 }
